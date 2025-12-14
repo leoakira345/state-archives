@@ -259,6 +259,33 @@ async function initDatabase() {
                     hours: 'Monday-Friday 10:00 AM - 5:00 PM',
                     featuredCollections: ['COL001', 'COL002', 'COL003', 'COL004']
                 },
+
+// Inside initDatabase(), add to initialData:
+notifications: [
+    {
+        id: 'NOTIF001',
+        type: 'info',
+        title: 'New Collection Added',
+        message: 'Royal Chronicles collection has been updated with 25 new documents',
+        link: 'collections',
+        linkText: 'View Collection',
+        published: true,
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        createdBy: 'USR001'
+    },
+    {
+        id: 'NOTIF002',
+        type: 'success',
+        title: 'System Update Complete',
+        message: 'Digital archives system has been successfully updated with new features',
+        link: 'digital-archives',
+        linkText: 'Explore',
+        published: true,
+        createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+        createdBy: 'USR001'
+    }
+],
+
                 analytics: {
                     totalViews: 1245,
                     totalDownloads: 378,
@@ -720,13 +747,13 @@ app.delete('/api/documents/:id', requireRole(['superadmin', 'archivist']), async
             return res.status(404).json({ error: 'Document not found' });
         }
         
-        // Soft delete
-        db.documents[index].deleted = true;
-        db.documents[index].deletedAt = new Date().toISOString();
+        // ACTUALLY REMOVE from array instead of soft delete
+        db.documents.splice(index, 1);
         
         await writeDatabase(db);
-        res.json({ success: true });
+        res.json({ success: true, message: 'Document deleted' });
     } catch (error) {
+        console.error('Delete error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -1092,6 +1119,32 @@ app.post('/api/gallery', requireAuth, upload.array('images', 20), async (req, re
     }
 });
 
+app.put('/api/gallery/:id', requireAuth, async (req, res) => {
+    try {
+        const db = await readDatabase();
+        const index = db.gallery.findIndex(item => item.id === req.params.id);
+        
+        if (index === -1) {
+            return res.status(404).json({ error: 'Gallery item not found' });
+        }
+        
+        db.gallery[index] = {
+            ...db.gallery[index],
+            title: req.body.title,
+            description: req.body.description,
+            published: req.body.published,
+            updatedAt: new Date().toISOString()
+        };
+        
+        await writeDatabase(db);
+        
+        res.json({ success: true, item: db.gallery[index] });
+    } catch (error) {
+        console.error('Gallery update error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.delete('/api/gallery/:id', requireAuth, async (req, res) => {
     try {
         const db = await readDatabase();
@@ -1289,6 +1342,243 @@ app.get('/api/analytics/stats', async (req, res) => {
             yearsCovered: 0,
             success: false
         });
+    }
+});
+
+// ===== Notification Routes =====
+// IMPORTANT: Specific routes MUST come before general routes
+
+// Upload files for notifications
+app.post('/api/notifications/upload', requireAuth, upload.array('files', 5), async (req, res) => {
+    try {
+        console.log('Uploading notification files...');
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ error: 'No files uploaded' });
+        }
+        
+        const files = req.files.map(file => ({
+            type: file.mimetype.startsWith('image') ? 'image' : 'document',
+            url: `/uploads/documents/${file.filename}`,
+            originalName: file.originalname,
+            size: file.size,
+            mimetype: file.mimetype
+        }));
+        
+        console.log('Files uploaded:', files);
+        res.json({ files, success: true });
+    } catch (error) {
+        console.error('Notification file upload error:', error);
+        res.status(500).json({ error: 'Upload failed: ' + error.message });
+    }
+});
+
+// Get all notifications for admin (including unpublished)
+app.get('/api/notifications/admin', requireAuth, async (req, res) => {
+    try {
+        console.log('Fetching admin notifications');
+        const db = await readDatabase();
+        
+        if (!db.notifications) {
+            db.notifications = [];
+        }
+        
+        const notifications = db.notifications.sort((a, b) => 
+            new Date(b.createdAt) - new Date(a.createdAt)
+        );
+        
+        console.log('Returning', notifications.length, 'admin notifications');
+        res.json({ notifications, success: true });
+    } catch (error) {
+        console.error('Fetch admin notifications error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error', 
+            notifications: [], 
+            success: false 
+        });
+    }
+});
+
+// Get all notifications (public - only published)
+app.get('/api/notifications', async (req, res) => {
+    try {
+        console.log('Fetching public notifications');
+        const db = await readDatabase();
+        
+        if (!db.notifications) {
+            db.notifications = [];
+        }
+        
+        const notifications = db.notifications
+            .filter(n => n.published)
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        
+        console.log('Returning', notifications.length, 'public notifications');
+        res.json({ notifications, success: true });
+    } catch (error) {
+        console.error('Fetch notifications error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error', 
+            notifications: [], 
+            success: false 
+        });
+    }
+});
+
+// Create notification (admin only)
+app.post('/api/notifications', requireAuth, async (req, res) => {
+    try {
+        console.log('Creating notification:', req.body);
+        
+        const db = await readDatabase();
+        
+        if (!db.notifications) {
+            db.notifications = [];
+        }
+        
+        const notification = {
+            id: generateId('NOTIF'),
+            type: req.body.type || 'info',
+            title: req.body.title,
+            message: req.body.message,
+            link: req.body.link || '',
+            linkText: req.body.linkText || 'View',
+            attachments: req.body.attachments || [],
+            published: req.body.published !== false,
+            createdAt: new Date().toISOString(),
+            createdBy: req.session.userId
+        };
+        
+        console.log('Notification created with attachments:', notification.attachments.length);
+        
+        db.notifications.push(notification);
+        await writeDatabase(db);
+        
+        console.log('Notification saved:', notification.id);
+        res.status(201).json({ notification, success: true });
+    } catch (error) {
+        console.error('Create notification error:', error);
+        res.status(500).json({ 
+            error: 'Failed to create notification: ' + error.message, 
+            success: false 
+        });
+    }
+});
+
+// Update notification (admin only)
+app.put('/api/notifications/:id', requireAuth, async (req, res) => {
+    try {
+        console.log('=== UPDATE NOTIFICATION START ===');
+        console.log('Notification ID:', req.params.id);
+        console.log('Request body:', JSON.stringify(req.body, null, 2));
+        console.log('Attachments received:', req.body.attachments);
+        
+        const db = await readDatabase();
+        
+        if (!db.notifications) {
+            console.log('No notifications array in database');
+            return res.status(404).json({ error: 'Notifications not found', success: false });
+        }
+        
+        const index = db.notifications.findIndex(n => n.id === req.params.id);
+        
+        if (index === -1) {
+            console.log('Notification not found:', req.params.id);
+            return res.status(404).json({ error: 'Notification not found', success: false });
+        }
+        
+        console.log('Found notification at index:', index);
+        console.log('Old notification:', JSON.stringify(db.notifications[index], null, 2));
+        
+        // Update the notification
+        db.notifications[index] = {
+            id: db.notifications[index].id,
+            type: req.body.type,
+            title: req.body.title,
+            message: req.body.message,
+            link: req.body.link || '',
+            linkText: req.body.linkText || 'View',
+            attachments: req.body.attachments || [],
+            published: req.body.published,
+            createdAt: db.notifications[index].createdAt,
+            createdBy: db.notifications[index].createdBy,
+            updatedAt: new Date().toISOString()
+        };
+        
+        console.log('New notification:', JSON.stringify(db.notifications[index], null, 2));
+        console.log('Attachments in updated notification:', db.notifications[index].attachments);
+        
+        await writeDatabase(db);
+        console.log('Database written successfully');
+        
+        // Verify it was saved
+        const verifyDb = await readDatabase();
+        const verifyNotif = verifyDb.notifications.find(n => n.id === req.params.id);
+        console.log('Verified notification after save:', JSON.stringify(verifyNotif, null, 2));
+        console.log('Verified attachments:', verifyNotif.attachments);
+        console.log('=== UPDATE NOTIFICATION END ===');
+        
+        res.json({ notification: db.notifications[index], success: true });
+    } catch (error) {
+        console.error('Update notification error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error: ' + error.message, 
+            success: false 
+        });
+    }
+});
+
+// Delete notification (admin only)
+app.delete('/api/notifications/:id', requireAuth, async (req, res) => {
+    try {
+        const db = await readDatabase();
+        
+        if (!db.notifications) {
+            return res.status(404).json({ error: 'Notification not found', success: false });
+        }
+        
+        const index = db.notifications.findIndex(n => n.id === req.params.id);
+        
+        if (index === -1) {
+            return res.status(404).json({ error: 'Notification not found', success: false });
+        }
+        
+        db.notifications.splice(index, 1);
+        await writeDatabase(db);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete notification error:', error);
+        res.status(500).json({ error: 'Internal server error', success: false });
+    }
+});
+
+// Mark notification as read
+app.post('/api/notifications/:id/read', async (req, res) => {
+    try {
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/notifications/upload', requireAuth, upload.array('files', 5), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ error: 'No files uploaded' });
+        }
+        
+        const files = req.files.map(file => ({
+            type: file.mimetype.startsWith('image') ? 'image' : 'document',
+            url: `/uploads/documents/${file.filename}`,
+            originalName: file.originalname,
+            size: file.size,
+            mimetype: file.mimetype
+        }));
+        
+        res.json({ files, success: true });
+    } catch (error) {
+        console.error('Notification file upload error:', error);
+        res.status(500).json({ error: 'Upload failed: ' + error.message });
     }
 });
 
