@@ -583,7 +583,6 @@ function showAdminLogin() {
                         </div>
                         <button type="submit" class="btn btn-primary btn-block">Login</button>
                     </form>
-                    <p class="login-help">Default credentials: admin / Manipur@2024</p>
                 </div>
             </div>
         </section>
@@ -644,10 +643,13 @@ function debounce(func, wait) {
     };
 }
 
-// ===== API Functions =====
 async function apiRequest(endpoint, options = {}) {
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        const url = `${API_BASE_URL}${endpoint}`;  // Construct full URL
+        console.log('API Request:', url, options);  // Debug log
+        
+        const response = await fetch(url, {
+            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
                 ...options.headers
@@ -656,6 +658,8 @@ async function apiRequest(endpoint, options = {}) {
         });
         
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`HTTP error! status: ${response.status}`, errorText);
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
@@ -1454,11 +1458,14 @@ function showAdminDashboard() {
                 
                 <div class="admin-actions">
     <button class="btn btn-info" onclick="showSiteInfoEditor()">
-        <i class="fas fa-info-circle"></i> EDIT SITE INFO
-    </button>
-    <button class="btn btn-primary" onclick="showUploadDocuments()">
-        <i class="fas fa-upload"></i> UPLOAD DOCUMENTS
-    </button>
+    <i class="fas fa-info-circle"></i> EDIT SITE INFO
+</button>
+<button class="btn btn-primary" onclick="showManageNotifications()">
+    <i class="fas fa-bell"></i> MANAGE NOTIFICATIONS
+</button>
+<button class="btn btn-primary" onclick="showUploadDocuments()">
+    <i class="fas fa-upload"></i> UPLOAD DOCUMENTS
+</button>
     <button class="btn btn-primary" onclick="showManageDocuments()">
         <i class="fas fa-file-alt"></i> MANAGE DOCUMENTS
     </button>
@@ -1979,44 +1986,164 @@ async function loadCollectionsTable() {
             return;
         }
         
-        container.innerHTML = `
-            <table class="admin-table">
-                <thead>
-                    <tr>
-                        <th>Collection Name</th>
-                        <th>Items</th>
-                        <th>Date Range</th>
-                        <th>Featured</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${collections.map(col => `
-                        <tr>
-                            <td><strong>${col.name}</strong></td>
-                            <td>${col.itemCount || 0}</td>
-                            <td>${col.dateRange || 'N/A'}</td>
-                            <td>
-                                <span class="badge ${col.featured ? 'badge-success' : 'badge-default'}">
-                                    ${col.featured ? 'Yes' : 'No'}
-                                </span>
-                            </td>
-                            <td class="actions">
-                                <button class="btn-icon" onclick="editCollection('${col.id}')" title="Edit">
-                                    <i class="fas fa-edit"></i>
-                                </button>
-                                <button class="btn-icon" onclick="deleteCollection('${col.id}')" title="Delete">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        `;
+       container.innerHTML = `
+    <table class="admin-table">
+        <thead>
+            <tr>
+                <th>Collection Name</th>
+                <th>Items</th>
+                <th>Date Range</th>
+                <th>Featured</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${collections.map(col => `
+                <tr>
+                    <td><strong>${col.name}</strong></td>
+                    <td>${col.itemCount || 0}</td>
+                    <td>${col.dateRange || 'N/A'}</td>
+                    <td>
+                        <span class="badge ${col.featured ? 'badge-success' : 'badge-default'}">
+                            ${col.featured ? 'Yes' : 'No'}
+                        </span>
+                    </td>
+                   <td class="actions">
+    <button class="btn-icon" onclick="editCollection('${col.id}')" title="Edit">
+        <i class="fas fa-edit"></i>
+    </button>
+    <button class="btn-icon btn-icon-danger" onclick="deleteCollection('${col.id}')" title="Delete">
+        <i class="fas fa-trash"></i>
+    </button>
+</td>
+                </tr>
+            `).join('')}
+        </tbody>
+    </table>
+`;
+
+// Add event listeners after HTML is created
+setTimeout(() => {
+    document.querySelectorAll('.edit-collection-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const collectionId = this.getAttribute('data-id');
+            editCollection(collectionId);
+        });
+    });
+    
+    document.querySelectorAll('.delete-collection-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const collectionId = this.getAttribute('data-id');
+            deleteCollection(collectionId);
+        });
+    });
+}, 100);
     } catch (error) {
         container.innerHTML = '<p class="error-message">Failed to load collections.</p>';
     }
+}
+
+async function editCollection(collectionId) {
+    try {
+        console.log('Editing collection:', collectionId);
+        
+        // Fetch collections
+        const response = await apiRequest('/collections');
+        const collection = response.collections.find(col => col.id === collectionId);
+        
+        if (!collection) {
+            showToast('Collection not found', 'error');
+            return;
+        }
+        
+        console.log('Collection loaded:', collection);
+        
+        // Create modal
+        const modal = createModal('Edit Collection', `
+            <form id="editCollectionForm" class="modal-form">
+                <div class="form-group">
+                    <label for="editColName">Collection Name *</label>
+                    <input type="text" id="editColName" required value="${collection.name}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="editColDescription">Description *</label>
+                    <textarea id="editColDescription" rows="4" required>${collection.description}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editColDateRange">Date Range</label>
+                    <input type="text" id="editColDateRange" placeholder="e.g., 1709-1947" value="${collection.dateRange || ''}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="editColCoverImage">Cover Image URL</label>
+                    <input type="text" id="editColCoverImage" value="${collection.coverImage || ''}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="editColItemCount">Item Count</label>
+                    <input type="number" id="editColItemCount" value="${collection.itemCount || 0}">
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="editColFeatured" ${collection.featured ? 'checked' : ''}>
+                        Feature this collection
+                    </label>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal(this.closest('.modal'))">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Update Collection
+                    </button>
+                </div>
+            </form>
+        `);
+        
+        // Handle form submit
+        document.getElementById('editCollectionForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const updatedData = {
+                name: document.getElementById('editColName').value,
+                description: document.getElementById('editColDescription').value,
+                dateRange: document.getElementById('editColDateRange').value,
+                coverImage: document.getElementById('editColCoverImage').value,
+                itemCount: parseInt(document.getElementById('editColItemCount').value) || 0,
+                featured: document.getElementById('editColFeatured').checked
+            };
+            
+            try {
+                await apiRequest(`/collections/${collectionId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(updatedData)
+                });
+                
+                closeModal(modal);
+                showToast('Collection updated successfully!', 'success');
+                showManageCollections();
+            } catch (error) {
+                showToast('Failed to update collection', 'error');
+            }
+        });
+        
+    } catch (error) {
+        console.error('Edit collection error:', error);
+        showToast('Failed to load collection', 'error');
+    }
+}
+// Helper function to escape HTML
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
 }
 
 function showCreateCollectionModal() {
@@ -3679,19 +3806,30 @@ function editDocument(docId) {
 function deleteDocument(docId, docTitle) {
     const modal = createProfessionalConfirmDialog(
         'Delete Document',
-        `Are you sure you want to delete this document?`,
+        'Are you sure you want to delete this document?',
         `<strong>${docTitle}</strong><br><br>This action cannot be undone. The document will be permanently removed from the system.`,
         'danger',
         async () => {
             try {
-                await apiRequest(`/documents/${docId}`, {
-                    method: 'DELETE'
+                const response = await fetch(`/api/documents/${docId}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
                 });
                 
-                closeModal(modal);
-                showToast('Document deleted successfully!', 'success');
-                showManageDocuments();
+                if (response.ok) {
+                    closeModal(modal);
+                    showToast('Document deleted successfully!', 'success');
+                    
+                    // Wait a moment then reload
+                    setTimeout(() => {
+                        showManageDocuments();
+                    }, 500);
+                } else {
+                    const errorData = await response.json();
+                    showToast(errorData.error || 'Failed to delete document', 'error');
+                }
             } catch (error) {
+                console.error('Delete error:', error);
                 showToast('Failed to delete document', 'error');
             }
         }
@@ -3826,12 +3964,18 @@ function editGalleryImage(imageId) {
                         showToast('Gallery image updated!', 'success');
                         showManageGallery();
                     } else {
-                        showToast('Update failed', 'error');
+                        const errorData = await response.json();
+                        showToast(errorData.error || 'Update failed', 'error');
                     }
                 } catch (error) {
+                    console.error('Update error:', error);
                     showToast('Update failed', 'error');
                 }
             });
+        })
+        .catch(error => {
+            console.error('Error loading gallery image:', error);
+            showToast('Failed to load image details', 'error');
         });
 }
 
@@ -4655,6 +4799,7 @@ function init() {
     initLazyLoading();
     initScrollAnimations();
     checkAuthStatus();
+    initNotifications();
     
     // Load dynamic content
     loadNews();
@@ -6614,5 +6759,1175 @@ async function viewNewsDetail(newsId) {
     } catch (error) {
         console.error('Failed to load news details:', error);
         showToast('Failed to load news article', 'error');
+    }
+
+
+}// ===== Notification System =====
+
+// Sample notifications (replace with API calls in production)
+let notifications = [
+    {
+        id: 1,
+        type: 'info',
+        title: 'New Collection Added',
+        message: 'Royal Chronicles collection has been updated with 25 new documents',
+        time: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
+        read: false
+    },
+    {
+        id: 2,
+        type: 'success',
+        title: 'Document Digitized',
+        message: 'Your requested document "Freedom Movement Letter 1942" is now available',
+        time: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
+        read: false
+    },
+    {
+        id: 3,
+        type: 'warning',
+        title: 'Maintenance Schedule',
+        message: 'Digital archives will be under maintenance on Dec 20, 2024',
+        time: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
+        read: true
+    },
+    {
+        id: 4,
+        type: 'info',
+        title: 'New Research Guide',
+        message: 'Genealogy Research Guide has been updated with new resources',
+        time: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
+        read: true
+    }
+];
+
+// Initialize notifications on page load
+function initNotifications() {
+    updateNotificationBadge();
+    loadNotifications();
+}
+
+// Toggle notification panel
+function toggleNotifications() {
+    const panel = document.getElementById('notificationPanel');
+    const overlay = document.getElementById('notificationOverlay');
+    
+    if (panel && overlay) {
+        panel.classList.toggle('active');
+        overlay.classList.toggle('active');
+        
+        if (panel.classList.contains('active')) {
+            loadNotifications();
+        }
+    }
+    
+    return false;
+}
+
+// Close notification panel
+function closeNotifications() {
+    const panel = document.getElementById('notificationPanel');
+    const overlay = document.getElementById('notificationOverlay');
+    
+    if (panel && overlay) {
+        panel.classList.remove('active');
+        overlay.classList.remove('active');
+    }
+}
+
+// Load notifications into panel
+function loadNotifications() {
+    const container = document.getElementById('notificationList');
+    if (!container) return;
+    
+    if (notifications.length === 0) {
+        container.innerHTML = `
+            <div class="empty-notifications">
+                <i class="fas fa-bell-slash"></i>
+                <p>No notifications</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = notifications.map(notif => {
+        const timeAgo = getTimeAgo(notif.time);
+        return `
+            <div class="notification-item ${notif.read ? '' : 'unread'}" onclick="markAsRead(${notif.id})">
+                <div class="notification-icon ${notif.type}">
+                    <i class="fas fa-${getNotificationIcon(notif.type)}"></i>
+                </div>
+                <div class="notification-content">
+                    <div class="notification-title">${notif.title}</div>
+                    <div class="notification-message">${notif.message}</div>
+                    <div class="notification-time">${timeAgo}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Get icon for notification type
+function getNotificationIcon(type) {
+    const icons = {
+        'info': 'info-circle',
+        'success': 'check-circle',
+        'warning': 'exclamation-triangle',
+        'error': 'times-circle'
+    };
+    return icons[type] || 'bell';
+}
+
+// Calculate time ago
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    let interval = seconds / 31536000;
+    if (interval > 1) return Math.floor(interval) + ' years ago';
+    
+    interval = seconds / 2592000;
+    if (interval > 1) return Math.floor(interval) + ' months ago';
+    
+    interval = seconds / 86400;
+    if (interval > 1) return Math.floor(interval) + ' days ago';
+    
+    interval = seconds / 3600;
+    if (interval > 1) return Math.floor(interval) + ' hours ago';
+    
+    interval = seconds / 60;
+    if (interval > 1) return Math.floor(interval) + ' minutes ago';
+    
+    return 'Just now';
+}
+
+// Update notification badge count
+function updateNotificationBadge() {
+    const badge = document.getElementById('notificationCount');
+    if (!badge) return;
+    
+    const unreadCount = notifications.filter(n => !n.read).length;
+    badge.textContent = unreadCount;
+    
+    if (unreadCount === 0) {
+        badge.style.display = 'none';
+    } else {
+        badge.style.display = 'flex';
+    }
+}
+
+// Mark notification as read
+function markAsRead(id) {
+    const notification = notifications.find(n => n.id === id);
+    if (notification && !notification.read) {
+        notification.read = true;
+        updateNotificationBadge();
+        loadNotifications();
+        
+        // Save to backend in production
+        // apiRequest(`/notifications/${id}/read`, { method: 'POST' });
+    }
+}
+
+// Mark all as read
+function markAllAsRead() {
+    notifications.forEach(n => n.read = true);
+    updateNotificationBadge();
+    loadNotifications();
+    showToast('All notifications marked as read', 'success');
+    
+    // Save to backend in production
+    // apiRequest('/notifications/mark-all-read', { method: 'POST' });
+}
+
+// Clear all notifications
+function clearAllNotifications() {
+    if (confirm('Are you sure you want to clear all notifications?')) {
+        notifications = [];
+        updateNotificationBadge();
+        loadNotifications();
+        showToast('All notifications cleared', 'success');
+        
+        // Save to backend in production
+        // apiRequest('/notifications/clear-all', { method: 'DELETE' });
+    }
+}
+
+// Close notification panel when clicking overlay
+document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('notificationOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', closeNotifications);
+    }
+    
+    // Close on escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeNotifications();
+        }
+    });
+    
+    // Initialize notifications
+    initNotifications();
+});
+
+// Add notification (for admin or system)
+function addNotification(type, title, message) {
+    const newNotification = {
+        id: Date.now(),
+        type: type,
+        title: title,
+        message: message,
+        time: new Date(),
+        read: false
+    };
+    
+    notifications.unshift(newNotification);
+    updateNotificationBadge();
+    
+    // If panel is open, reload
+    const panel = document.getElementById('notificationPanel');
+    if (panel && panel.classList.contains('active')) {
+        loadNotifications();
+    }
+    
+    // Save to backend in production
+    // apiRequest('/notifications', { method: 'POST', body: JSON.stringify(newNotification) });
+}
+
+// Example: Simulate receiving new notification (remove in production)
+function simulateNewNotification() {
+    const types = ['info', 'success', 'warning'];
+    const titles = [
+        'New Document Available',
+        'Collection Updated',
+        'Research Request Processed',
+        'System Update'
+    ];
+    const messages = [
+        'A new document has been added to the archives',
+        'The Freedom Movement collection has been updated',
+        'Your research request has been completed',
+        'System maintenance completed successfully'
+    ];
+    
+    const randomType = types[Math.floor(Math.random() * types.length)];
+    const randomTitle = titles[Math.floor(Math.random() * titles.length)];
+    const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+    
+    addNotification(randomType, randomTitle, randomMessage);
+    showToast('New notification received!', 'info');
+}
+
+// ===== Notification System =====
+
+// Store read notifications in localStorage
+function getReadNotifications() {
+    try {
+        var read = localStorage.getItem('readNotifications');
+        return read ? JSON.parse(read) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function markNotificationAsRead(id) {
+    try {
+        var read = getReadNotifications();
+        if (read.indexOf(id) === -1) {
+            read.push(id);
+            localStorage.setItem('readNotifications', JSON.stringify(read));
+        }
+    } catch (e) {
+        console.log('Could not save read status');
+    }
+}
+
+// Initialize notifications on page load
+async function initNotifications() {
+    await loadNotifications();
+    updateNotificationBadge();
+}
+
+// Load notifications from API
+async function loadNotifications() {
+    try {
+        var response = await fetch('/api/notifications', {
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            console.error('Notifications response not ok:', response.status);
+            window.currentNotifications = [];
+            updateNotificationBadge();
+            return;
+        }
+        
+        var data = await response.json();
+        
+        if (data.success) {
+            window.currentNotifications = data.notifications || [];
+        } else {
+            window.currentNotifications = [];
+        }
+        
+        updateNotificationBadge();
+        
+    } catch (error) {
+        console.error('Failed to load notifications:', error);
+        window.currentNotifications = [];
+        updateNotificationBadge();
+    }
+}
+
+// Toggle notification panel
+function toggleNotifications() {
+    var panel = document.getElementById('notificationPanel');
+    var overlay = document.getElementById('notificationOverlay');
+    
+    if (panel && overlay) {
+        var isActive = panel.classList.toggle('active');
+        overlay.classList.toggle('active');
+        
+        if (isActive) {
+            displayNotifications();
+        }
+    }
+    
+    return false;
+}
+
+// Close notification panel
+function closeNotifications() {
+    var panel = document.getElementById('notificationPanel');
+    var overlay = document.getElementById('notificationOverlay');
+    
+    if (panel && overlay) {
+        panel.classList.remove('active');
+        overlay.classList.remove('active');
+    }
+}
+
+// Replace the displayNotifications function
+function displayNotifications() {
+    var container = document.getElementById('notificationList');
+    if (!container) return;
+    
+    var notifications = window.currentNotifications || [];
+    var readNotifications = getReadNotifications();
+    
+    if (notifications.length === 0) {
+        container.innerHTML = '<div class="empty-notifications"><i class="fas fa-bell-slash"></i><p>No notifications</p></div>';
+        return;
+    }
+    
+    var html = '';
+    for (var i = 0; i < notifications.length; i++) {
+        var notif = notifications[i];
+        var timeAgo = getTimeAgo(new Date(notif.createdAt));
+        var isRead = readNotifications.indexOf(notif.id) !== -1;
+        
+        html += '<div class="notification-item ' + (isRead ? '' : 'unread') + '" onclick="viewNotificationDetail(\'' + notif.id + '\')">';
+        html += '<div class="notification-icon ' + notif.type + '"><i class="fas fa-' + getNotificationIcon(notif.type) + '"></i></div>';
+        html += '<div class="notification-content">';
+        html += '<div class="notification-title">' + notif.title + '</div>';
+        
+        // Show truncated message in list
+        var messagePreview = notif.message.length > 80 ? notif.message.substring(0, 80) + '...' : notif.message;
+        html += '<div class="notification-message">' + messagePreview + '</div>';
+        
+        html += '<div class="notification-time">' + timeAgo + '</div>';
+        html += '</div></div>';
+    }
+    
+    container.innerHTML = html;
+}
+
+// Update the viewNotificationDetail function
+function viewNotificationDetail(notificationId) {
+    var notifications = window.currentNotifications || [];
+    var notification = null;
+    
+    for (var i = 0; i < notifications.length; i++) {
+        if (notifications[i].id === notificationId) {
+            notification = notifications[i];
+            break;
+        }
+    }
+    
+    if (!notification) {
+        showToast('Notification not found', 'error');
+        return;
+    }
+    
+    // Mark as read
+    markNotificationAsRead(notificationId);
+    updateNotificationBadge();
+    
+    // Close notification panel
+    closeNotifications();
+    
+    // Create modal with attachments section
+    var modal = createModal('', `
+        <div class="notification-detail-view">
+            <div class="notification-detail-header">
+                <div class="notification-type-badge ${notification.type}">
+                    <i class="fas fa-${getNotificationIcon(notification.type)}"></i>
+                    ${notification.type.toUpperCase()}
+                </div>
+                <div class="notification-date">
+                    <i class="fas fa-calendar-alt"></i> ${formatDate(notification.createdAt)}
+                </div>
+            </div>
+            
+            <div class="notification-detail-body">
+                <h3>${notification.title}</h3>
+                <div class="notification-full-message">
+                    ${notification.message}
+                </div>
+                
+                ${notification.attachments && notification.attachments.length > 0 ? `
+                    <div class="notification-attachments">
+                        <h4><i class="fas fa-paperclip"></i> Attachments (${notification.attachments.length})</h4>
+                        <div class="attachments-list">
+                            ${notification.attachments.map(function(file, index) {
+                                var fileIcon = file.type === 'image' ? 'fa-file-image' : 'fa-file-pdf';
+                                var fileSize = file.size ? (file.size / 1024).toFixed(2) + ' KB' : '';
+                                
+                                return `
+                                    <div class="attachment-item">
+                                        <div class="attachment-info">
+                                            <i class="fas ${fileIcon} attachment-icon"></i>
+                                            <div class="attachment-details">
+                                                <strong>${file.originalName}</strong>
+                                                ${fileSize ? `<span class="attachment-size">${fileSize}</span>` : ''}
+                                            </div>
+                                        </div>
+                                        <button class="btn btn-sm btn-primary" onclick="downloadAttachment('${file.url}', '${file.originalName}')">
+                                            <i class="fas fa-download"></i> Download
+                                        </button>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+            
+            ${notification.link ? `
+                <div class="notification-detail-actions">
+                    <button class="btn btn-secondary" onclick="closeModal(document.querySelector('.modal'))">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                    <button class="btn btn-primary" onclick="navigateTo('${notification.link}'); closeModal(document.querySelector('.modal'));">
+                        <i class="fas fa-arrow-right"></i> ${notification.linkText || 'View Details'}
+                    </button>
+                </div>
+            ` : `
+                <div class="notification-detail-actions">
+                    <button class="btn btn-primary" onclick="closeModal(document.querySelector('.modal'))">
+                        <i class="fas fa-check"></i> Got it
+                    </button>
+                </div>
+            `}
+        </div>
+    `);
+    
+    // Remove the default modal header since we have custom header
+    var modalHeader = modal.querySelector('.modal-header');
+    if (modalHeader) {
+        modalHeader.style.display = 'none';
+    }
+}
+// Handle notification click
+function handleNotificationClick(notificationId, link) {
+    markNotificationAsRead(notificationId);
+    updateNotificationBadge();
+    displayNotifications();
+    closeNotifications();
+    
+    if (link) {
+        navigateTo(link);
+    }
+}
+
+// Get icon for notification type
+function getNotificationIcon(type) {
+    var icons = {
+        'info': 'info-circle',
+        'success': 'check-circle',
+        'warning': 'exclamation-triangle',
+        'error': 'times-circle'
+    };
+    return icons[type] || 'bell';
+}
+
+// Calculate time ago
+function getTimeAgo(date) {
+    var seconds = Math.floor((new Date() - date) / 1000);
+    
+    var interval = seconds / 31536000;
+    if (interval > 1) return Math.floor(interval) + ' years ago';
+    
+    interval = seconds / 2592000;
+    if (interval > 1) return Math.floor(interval) + ' months ago';
+    
+    interval = seconds / 86400;
+    if (interval > 1) return Math.floor(interval) + ' days ago';
+    
+    interval = seconds / 3600;
+    if (interval > 1) return Math.floor(interval) + ' hours ago';
+    
+    interval = seconds / 60;
+    if (interval > 1) return Math.floor(interval) + ' minutes ago';
+    
+    return 'Just now';
+}
+
+// Update notification badge count
+function updateNotificationBadge() {
+    var badge = document.getElementById('notificationCount');
+    if (!badge) return;
+    
+    var notifications = window.currentNotifications || [];
+    var readNotifications = getReadNotifications();
+    var unreadCount = 0;
+    
+    for (var i = 0; i < notifications.length; i++) {
+        if (readNotifications.indexOf(notifications[i].id) === -1) {
+            unreadCount++;
+        }
+    }
+    
+    badge.textContent = unreadCount;
+    
+    if (unreadCount === 0) {
+        badge.style.display = 'none';
+    } else {
+        badge.style.display = 'flex';
+    }
+}
+
+// Mark all as read
+function markAllAsRead() {
+    var notifications = window.currentNotifications || [];
+    for (var i = 0; i < notifications.length; i++) {
+        markNotificationAsRead(notifications[i].id);
+    }
+    updateNotificationBadge();
+    displayNotifications();
+    showToast('All notifications marked as read', 'success');
+}
+
+// Clear all notifications
+function clearAllNotifications() {
+    if (confirm('Are you sure you want to clear all notifications?')) {
+        markAllAsRead();
+        showToast('All notifications cleared', 'success');
+    }
+}
+
+// Reload notifications every 5 minutes
+setInterval(loadNotifications, 5 * 60 * 1000);
+
+// Close notification panel when clicking overlay
+document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('notificationOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', closeNotifications);
+    }
+    
+    // Close on escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeNotifications();
+        }
+    });
+    
+    // Reload notifications every 5 minutes
+    setInterval(loadNotifications, 5 * 60 * 1000);
+});
+
+// ===== ADMIN: Manage Notifications =====
+
+function showManageNotifications() {
+    const main = document.querySelector('main');
+    main.innerHTML = `
+        <section class="admin-section">
+            <div class="container">
+                <div class="admin-header">
+                    <h1><i class="fas fa-bell"></i> Manage Notifications</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-primary" onclick="showCreateNotificationModal()">
+                            <i class="fas fa-plus"></i> Create Notification
+                        </button>
+                        <button class="btn btn-secondary" onclick="showAdminDashboard()">
+                            <i class="fas fa-arrow-left"></i> Back
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="notificationsTable" class="admin-table-container">
+                    <div class="loading">Loading notifications...</div>
+                </div>
+            </div>
+        </section>
+    `;
+    
+    loadNotificationsTable();
+}
+
+async function loadNotificationsTable() {
+    const container = document.getElementById('notificationsTable');
+    
+    try {
+        const response = await fetch('/api/notifications/admin', {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('HTTP error! status: ' + response.status + ' - ' + errorText);
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        
+        const data = await response.json();
+        const notifications = data.notifications || [];
+        
+        if (notifications.length === 0) {
+            container.innerHTML = '<p class="text-center">No notifications yet. Create your first notification!</p>';
+            return;
+        }
+        
+        const tableHTML = '<table class="admin-table">' +
+            '<thead>' +
+            '<tr>' +
+            '<th>Type</th>' +
+            '<th>Title</th>' +
+            '<th>Message</th>' +
+            '<th>Link</th>' +
+            '<th>Status</th>' +
+            '<th>Created</th>' +
+            '<th>Actions</th>' +
+            '</tr>' +
+            '</thead>' +
+            '<tbody>';
+        
+        const rowsHTML = notifications.map(function(notif) {
+            return '<tr>' +
+                '<td>' +
+                '<span class="notification-type-badge ' + notif.type + '">' +
+                '<i class="fas fa-' + getNotificationIcon(notif.type) + '"></i> ' +
+                notif.type.toUpperCase() +
+                '</span>' +
+                '</td>' +
+                '<td><strong>' + notif.title + '</strong></td>' +
+                '<td>' + notif.message.substring(0, 50) + (notif.message.length > 50 ? '...' : '') + '</td>' +
+                '<td>' + (notif.link ? '<span class="badge badge-info">' + notif.link + '</span>' : '<span class="text-muted">None</span>') + '</td>' +
+                '<td>' +
+                '<span class="badge ' + (notif.published ? 'badge-success' : 'badge-default') + '">' +
+                (notif.published ? 'Published' : 'Draft') +
+                '</span>' +
+                '</td>' +
+                '<td>' + formatDate(notif.createdAt) + '</td>' +
+                '<td class="actions">' +
+                '<button class="btn-icon" onclick="editNotification(\'' + notif.id + '\')" title="Edit">' +
+                '<i class="fas fa-edit"></i>' +
+                '</button>' +
+                '<button class="btn-icon btn-icon-danger" onclick="deleteNotification(\'' + notif.id + '\', \'' + notif.title.replace(/'/g, "\\'") + '\');" title="Delete">' +
+                '<i class="fas fa-trash"></i>' +
+                '</button>' +
+                '</td>' +
+                '</tr>';
+        }).join('');
+        
+        container.innerHTML = tableHTML + rowsHTML + '</tbody></table>';
+        
+    } catch (error) {
+        console.error('Failed to load notifications:', error);
+        container.innerHTML = '<p class="error-message">Failed to load notifications. Error: ' + error.message + '</p>';
+    }
+}
+function showCreateNotificationModal() {
+    const modal = createModal('Create Notification', `
+        <form id="createNotificationForm" class="modal-form">
+            <div class="form-group">
+                <label for="notifType">Type *</label>
+                <select id="notifType" required>
+                    <option value="info">Info (Blue)</option>
+                    <option value="success">Success (Green)</option>
+                    <option value="warning">Warning (Orange)</option>
+                    <option value="error">Error (Red)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="notifTitle">Title *</label>
+                <input type="text" id="notifTitle" required placeholder="e.g., New Collection Available">
+            </div>
+            
+            <div class="form-group">
+                <label for="notifMessage">Message *</label>
+                <textarea id="notifMessage" rows="3" required placeholder="Describe what this notification is about..."></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="notifLink">Link To (Optional)</label>
+                <select id="notifLink">
+                    <option value="">No Link</option>
+                    <option value="home">Home</option>
+                    <option value="digital-archives">Digital Archives</option>
+                    <option value="collections">Collections</option>
+                    <option value="gallery">Gallery</option>
+                    <option value="research">Research</option>
+                    <option value="education">Education</option>
+                    <option value="services">Services</option>
+                    <option value="about">About</option>
+                    <option value="contact">Contact</option>
+                </select>
+                <small class="form-help">Where should users go when they click this notification?</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="notifLinkText">Link Text</label>
+                <input type="text" id="notifLinkText" placeholder="e.g., View, Learn More, Explore" value="View">
+            </div>
+            
+            <div class="form-group">
+                <label>Attachments (Optional)</label>
+                <div class="file-upload-area">
+                    <input type="file" id="notifFilesInput" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style="display: none;">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('notifFilesInput').click()">
+                        <i class="fas fa-paperclip"></i> Upload Files
+                    </button>
+                    <small class="form-help">Supported: PDF, DOC, DOCX, JPG, PNG (Max 10MB each)</small>
+                </div>
+                <div id="notifFilesPreview" class="files-preview-list"></div>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="notifPublished" checked>
+                    Publish immediately
+                </label>
+            </div>
+            
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal(this.closest('.modal'))">Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-bell"></i> Create Notification
+                </button>
+            </div>
+        </form>
+    `);
+
+    // Store uploaded files globally
+    window.currentNotificationFiles = [];
+    
+    // Handle file selection
+    document.getElementById('notifFilesInput').addEventListener('change', handleNotificationFileUpload);
+    
+    // Handle form submission
+    document.getElementById('createNotificationForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const notificationData = {
+            type: document.getElementById('notifType').value,
+            title: document.getElementById('notifTitle').value,
+            message: document.getElementById('notifMessage').value,
+            link: document.getElementById('notifLink').value,
+            linkText: document.getElementById('notifLinkText').value || 'View',
+            attachments: window.currentNotificationFiles || [],
+            published: document.getElementById('notifPublished').checked
+        };
+        
+        try {
+            const response = await apiRequest('/notifications', {
+                method: 'POST',
+                body: JSON.stringify(notificationData)
+            });
+            
+            if (response.success) {
+                closeModal(modal);
+                showToast('Notification created successfully!', 'success');
+                
+                // Reload public notifications immediately
+                await loadNotifications();
+                
+                // Reload the admin table
+                showManageNotifications();
+                
+                // Clear files
+                window.currentNotificationFiles = [];
+            } else {
+                showToast('Failed to create notification', 'error');
+            }
+        } catch (error) {
+            console.error('Create notification error:', error);
+            showToast('Failed to create notification', 'error');
+        }
+    });
+}
+
+// Replace this function (around line 7470)
+async function handleNotificationFileUpload(e) {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+    
+    showToast('Uploading files...', 'success');
+    
+    const formData = new FormData();
+    files.forEach(file => {
+        formData.append('files', file);
+    });
+    
+    try {
+        const response = await fetch('/api/notifications/upload', {
+            method: 'POST',
+            credentials: 'include',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Upload response:', errorText);
+            throw new Error('Upload failed');
+        }
+        
+        const result = await response.json();
+        
+        if (result.success && result.files) {
+            // CRITICAL FIX: ADD to existing files, don't replace
+            if (!window.currentNotificationFiles) {
+                window.currentNotificationFiles = [];
+            }
+            
+            // ADD new files to the existing array
+            window.currentNotificationFiles.push(...result.files);
+            
+            console.log('Total files after upload:', window.currentNotificationFiles.length);
+            
+            // Display ALL files (old + new)
+            displayNotificationFilesPreview();
+            
+            showToast('Files uploaded successfully!', 'success');
+            
+            // Clear the file input so same files can be selected again
+            e.target.value = '';
+        } else {
+            throw new Error('Upload failed - no files returned');
+        }
+    } catch (error) {
+        console.error('File upload error:', error);
+        showToast('File upload failed: ' + error.message, 'error');
+    }
+}
+// Add function to display file previews with remove buttons
+function displayNotificationFilesPreview() {
+    const container = document.getElementById('notifFilesPreview');
+    if (!container) {
+        console.log('Preview container not found');
+        return;
+    }
+    
+    const files = window.currentNotificationFiles || [];
+    
+    console.log('Displaying files:', files.length, files);
+    
+    if (files.length === 0) {
+        container.innerHTML = '<p style="color: #666; font-size: 0.9rem; margin-top: 10px;">No files attached</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div style="margin-top: 15px;">
+            <strong>Attached Files (${files.length}):</strong>
+            <div style="margin-top: 10px;">
+                ${files.map((file, index) => {
+                    const fileIcon = file.type === 'image' ? 'fa-file-image' : 'fa-file-pdf';
+                    const fileSize = file.size ? (file.size / 1024).toFixed(2) + ' KB' : '';
+                    
+                    return `
+                        <div class="file-preview-item" style="display: flex; align-items: center; gap: 12px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; margin-bottom: 8px;">
+                            <div class="file-preview-icon" style="font-size: 1.5rem; color: var(--primary-color);">
+                                <i class="fas ${fileIcon}"></i>
+                            </div>
+                            <div class="file-preview-info" style="flex: 1;">
+                                <strong style="display: block; color: #333; font-size: 0.9rem;">${file.originalName}</strong>
+                                ${fileSize ? `<span style="color: #666; font-size: 0.85rem;">${fileSize}</span>` : ''}
+                            </div>
+                            <button type="button" class="btn-remove-file" onclick="removeNotificationFile(${index}); return false;" title="Remove file" style="background: #dc3545; color: white; border: none; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+// Update this function
+function removeNotificationFile(index) {
+    if (window.currentNotificationFiles && window.currentNotificationFiles.length > index) {
+        // Remove the file at the specified index
+        window.currentNotificationFiles.splice(index, 1);
+        
+        console.log('File removed. Remaining files:', window.currentNotificationFiles.length);
+        
+        // Re-display the preview
+        displayNotificationFilesPreview();
+        
+        showToast('File removed', 'info');
+    }
+    return false;
+}
+    
+    document.getElementById('createNotificationForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const notificationData = {
+        type: document.getElementById('notifType').value,
+        title: document.getElementById('notifTitle').value,
+        message: document.getElementById('notifMessage').value,
+        link: document.getElementById('notifLink').value,
+        linkText: document.getElementById('notifLinkText').value || 'View',
+        published: document.getElementById('notifPublished').checked
+    };
+    
+    try {
+        const response = await apiRequest('/notifications', {
+            method: 'POST',
+            body: JSON.stringify(notificationData)
+        });
+        
+        if (response.success) {
+            closeModal(modal);
+            showToast('Notification created successfully!', 'success');
+            
+            // IMPORTANT: Reload public notifications immediately
+            await loadNotifications();
+            
+            // Then reload the admin table
+            showManageNotifications();
+        } else {
+            showToast('Failed to create notification', 'error');
+        }
+    } catch (error) {
+        console.error('Create notification error:', error);
+        showToast('Failed to create notification', 'error');
+    }
+});
+
+function editNotification(notificationId) {
+    fetch('/api/notifications/admin', {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        const notification = data.notifications.find(n => n.id === notificationId);
+        
+        if (!notification) {
+            showToast('Notification not found', 'error');
+            return;
+        }
+        
+        // CRITICAL FIX: Store existing attachments BEFORE creating modal
+        window.currentNotificationFiles = notification.attachments ? [...notification.attachments] : [];
+        console.log('Loaded existing attachments:', window.currentNotificationFiles.length);
+        
+        const modal = createModal('Edit Notification', `
+            <form id="editNotificationForm" class="modal-form">
+                <div class="form-group">
+                    <label for="editNotifType">Type *</label>
+                    <select id="editNotifType" required>
+                        <option value="info" ${notification.type === 'info' ? 'selected' : ''}>Info (Blue)</option>
+                        <option value="success" ${notification.type === 'success' ? 'selected' : ''}>Success (Green)</option>
+                        <option value="warning" ${notification.type === 'warning' ? 'selected' : ''}>Warning (Orange)</option>
+                        <option value="error" ${notification.type === 'error' ? 'selected' : ''}>Error (Red)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editNotifTitle">Title *</label>
+                    <input type="text" id="editNotifTitle" required value="${notification.title}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="editNotifMessage">Message *</label>
+                    <textarea id="editNotifMessage" rows="3" required>${notification.message}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editNotifLink">Link To (Optional)</label>
+                    <select id="editNotifLink">
+                        <option value="" ${!notification.link ? 'selected' : ''}>No Link</option>
+                        <option value="home" ${notification.link === 'home' ? 'selected' : ''}>Home</option>
+                        <option value="digital-archives" ${notification.link === 'digital-archives' ? 'selected' : ''}>Digital Archives</option>
+                        <option value="collections" ${notification.link === 'collections' ? 'selected' : ''}>Collections</option>
+                        <option value="gallery" ${notification.link === 'gallery' ? 'selected' : ''}>Gallery</option>
+                        <option value="research" ${notification.link === 'research' ? 'selected' : ''}>Research</option>
+                        <option value="education" ${notification.link === 'education' ? 'selected' : ''}>Education</option>
+                        <option value="services" ${notification.link === 'services' ? 'selected' : ''}>Services</option>
+                        <option value="about" ${notification.link === 'about' ? 'selected' : ''}>About</option>
+                        <option value="contact" ${notification.link === 'contact' ? 'selected' : ''}>Contact</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editNotifLinkText">Link Text</label>
+                    <input type="text" id="editNotifLinkText" value="${notification.linkText || 'View'}">
+                </div>
+                
+                <div class="form-group">
+                    <label>Attachments</label>
+                    <div class="file-upload-area">
+                        <input type="file" id="editNotifFilesInput" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style="display: none;">
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editNotifFilesInput').click()">
+                            <i class="fas fa-paperclip"></i> Add More Files
+                        </button>
+                        <small class="form-help">Supported: PDF, DOC, DOCX, JPG, PNG (Max 10MB each)</small>
+                    </div>
+                    <div id="notifFilesPreview" class="files-preview-list"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="editNotifPublished" ${notification.published ? 'checked' : ''}>
+                        Published
+                    </label>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal(this.closest('.modal'))">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Update Notification
+                    </button>
+                </div>
+            </form>
+        `);
+        
+        // IMPORTANT: Display existing attachments IMMEDIATELY after modal is created
+        setTimeout(() => {
+            displayNotificationFilesPreview();
+        }, 100);
+        
+        // Handle NEW file selection
+        document.getElementById('editNotifFilesInput').addEventListener('change', handleNotificationFileUpload);
+        
+        // Handle form submission
+        document.getElementById('editNotificationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            console.log('Submitting with files:', window.currentNotificationFiles);
+            
+            const updatedData = {
+                type: document.getElementById('editNotifType').value,
+                title: document.getElementById('editNotifTitle').value,
+                message: document.getElementById('editNotifMessage').value,
+                link: document.getElementById('editNotifLink').value,
+                linkText: document.getElementById('editNotifLinkText').value || 'View',
+                attachments: window.currentNotificationFiles || [], // All files (old + new)
+                published: document.getElementById('editNotifPublished').checked
+            };
+            
+            console.log('Update data:', updatedData);
+            
+            try {
+                const response = await fetch(`/api/notifications/${notificationId}`, {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updatedData)
+                });
+                
+                const result = await response.json();
+                
+                console.log('Update result:', result);
+                
+                if (result.success) {
+                    closeModal(modal);
+                    showToast('Notification updated successfully!', 'success');
+                    
+                    // Clear the global files array
+                    window.currentNotificationFiles = [];
+                    
+                    // Reload public notifications
+                    await loadNotifications();
+                    
+                    // Reload admin table
+                    showManageNotifications();
+                } else {
+                    showToast('Failed to update notification', 'error');
+                }
+            } catch (error) {
+                console.error('Update notification error:', error);
+                showToast('Failed to update notification', 'error');
+            }
+        });
+    })
+    .catch(error => {
+        console.error('Load notification error:', error);
+        showToast('Failed to load notification details', 'error');
+    });
+}
+
+function deleteNotification(notificationId, notificationTitle) {
+    const modal = createProfessionalConfirmDialog(
+        'Delete Notification',
+        'Are you sure you want to delete this notification?',
+        `<strong>${notificationTitle}</strong><br><br>This action cannot be undone.`,
+        'danger',
+        async () => {
+            try {
+                const response = await apiRequest(`/notifications/${notificationId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.success) {
+                    closeModal(modal);
+                    showToast('Notification deleted successfully!', 'success');
+                    
+                    // IMPORTANT: Reload public notifications immediately
+                    await loadNotifications();
+                    
+                    // Then reload the admin table
+                    showManageNotifications();
+                } else {
+                    showToast('Failed to delete notification', 'error');
+                }
+            } catch (error) {
+                console.error('Delete notification error:', error);
+                showToast('Failed to delete notification', 'error');
+            }
+        }
+    );
+}
+
+// Add this function anywhere in main.js (suggested around line 7950)
+function downloadAttachment(fileUrl, fileName) {
+    try {
+        // Create a temporary link element
+        const link = document.createElement('a');
+        link.href = fileUrl;
+        link.download = fileName;
+        link.style.display = 'none';
+        
+        // Append to body, click, and remove
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showToast('Download started: ' + fileName, 'success');
+    } catch (error) {
+        console.error('Download error:', error);
+        showToast('Download failed', 'error');
     }
 }
